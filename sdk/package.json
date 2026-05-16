@@ -1,0 +1,28 @@
+{
+  "name": "@stoa/core",
+  "version": "0.1.0",
+  "description": "The official SDK for Stoa Protocol — settlement layer for cross-chain AI agents",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "stoa",
+    "arc",
+    "usdc",
+    "cctp",
+    "agents",
+    "web3",
+    "settlement"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "ethers": "^6.16.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

@@ -1,6 +1,4 @@
-Open `sdk/src/client.ts` and paste this:
 
-```typescript
 // ─────────────────────────────────────────
 // STOA PROTOCOL — Core Client
 // ─────────────────────────────────────────
@@ -236,4 +234,4 @@ export class StoaClient {
     }, intervalMs);
   }
 }
-```
+
