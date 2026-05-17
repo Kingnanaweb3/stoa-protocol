@@ -178,7 +178,7 @@ async function waitForValidation(
   arcWallet: ethers.Wallet
 ): Promise<void> {
   // Poll settlement status until Completed (status = 2)
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 120; i++) {
     await sleep(5000);
     const data = await settlement.getSettlement(jobId);
     console.log("  Settlement status:", data.status.toString());

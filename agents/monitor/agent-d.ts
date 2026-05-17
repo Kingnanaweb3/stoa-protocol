@@ -53,25 +53,25 @@ async function main() {
       // Query all events since last block
       const jobPostedEvents = await escrow.queryFilter(
         escrow.filters.JobPosted(),
-        lastBlock + 1,
+        Math.max(lastBlock + 1, currentBlock - 9000),
         currentBlock
       );
 
       const crossChainEvents = await escrow.queryFilter(
         escrow.filters.CrossChainJobPosted(),
-        lastBlock + 1,
+        Math.max(lastBlock + 1, currentBlock - 9000),
         currentBlock
       );
 
       const acceptedEvents = await escrow.queryFilter(
         escrow.filters.JobAccepted(),
-        lastBlock + 1,
+        Math.max(lastBlock + 1, currentBlock - 9000),
         currentBlock
       );
 
       const releasedEvents = await escrow.queryFilter(
         escrow.filters.PaymentReleased(),
-        lastBlock + 1,
+        Math.max(lastBlock + 1, currentBlock - 9000),
         currentBlock
       );
 

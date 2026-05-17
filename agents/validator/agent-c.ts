@@ -47,7 +47,7 @@ async function main() {
 
       const events = await settlement.queryFilter(
         settlement.filters.OutputSubmitted(),
-        lastBlock + 1,
+        Math.max(lastBlock + 1, currentBlock - 9000),
         currentBlock
       );
 
