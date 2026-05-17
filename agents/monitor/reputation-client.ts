@@ -8,7 +8,7 @@ const REPUTATION_API = "http://localhost:4021";
 
 export async function queryReputation(agentAddress: string): Promise<any> {
   const client = new GatewayClient({
-    chain: "arcTestnet",
+    chain: "baseSepolia",
     privateKey: CONFIG.privateKey as `0x${string}`,
   });
 

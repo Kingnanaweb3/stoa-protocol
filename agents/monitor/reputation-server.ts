@@ -1,14 +1,15 @@
 import express from "express";
 import { ethers } from "ethers";
+import { paymentMiddleware } from "@x402/express";
 import { createGatewayMiddleware } from "@circle-fin/x402-batching/server";
 import { CONFIG } from "../config.js";
 
-// Stoa Reputation API — powered by Circle Nanopayments
-// Agents pay $0.000001 USDC per reputation query
-// Seller = Agent D wallet, Buyer = any agent querying reputation
+// Stoa Reputation API
+// Protected by Circle Gateway Nanopayments via x402
+// Agents pay $0.000001 USDC per reputation query — gas free
 
 const PORT = 4021;
-const SELLER_ADDRESS = process.env.SELLER_ADDRESS || "0x0514E3b0eA3C16ADa117ecf1892b050df3C2F273";
+const SELLER_ADDRESS = (process.env.SELLER_ADDRESS || "0x0514E3b0eA3C16ADa117ecf1892b050df3C2F273") as `0x${string}`;
 
 const reputationAbi = [
   "function getReputation(address agent) external view returns (uint256)",
@@ -27,37 +28,34 @@ async function main() {
   const reputation = new ethers.Contract(CONFIG.contracts.reputation, reputationAbi, arcProvider);
   const registry = new ethers.Contract(CONFIG.contracts.registry, registryAbi, arcProvider);
 
-  // Circle Gateway Nanopayments middleware
+  // Circle Gateway middleware — handles 402 enforcement
   const gateway = createGatewayMiddleware({
     sellerAddress: SELLER_ADDRESS,
   });
 
   console.log("Stoa Reputation API starting...");
-  console.log("----------------------------------");
-  console.log("Seller address:", SELLER_ADDRESS);
-  console.log("Network: Arc Testnet");
-  console.log("Payment: $0.000001 USDC per query via Circle Nanopayments");
+  console.log("Seller:", SELLER_ADDRESS);
+  console.log("Price: $0.000001 USDC per query via Circle Nanopayments");
 
-  // Free endpoint — health check
-  app.get("/health", (req, res) => {
+  // Free health check
+  app.get("/health", (_req, res) => {
     res.json({
       status: "online",
       protocol: "Stoa Protocol",
       service: "Reputation API",
-      payment: "x402 / Circle Nanopayments",
+      payment: "Circle Gateway Nanopayments / x402",
       price: "$0.000001 USDC per query",
+      seller: SELLER_ADDRESS,
     });
   });
 
-  // Paid endpoint — reputation query
-  // Requires $0.000001 USDC via Circle Nanopayments before serving data
+  // Paid reputation query
   app.get(
     "/reputation/:address",
     gateway.require("$0.000001"),
     async (req, res) => {
       try {
         const agentAddress = req.params.address;
-
         if (!ethers.isAddress(agentAddress)) {
           return res.status(400).json({ error: "Invalid address" });
         }
@@ -85,44 +83,38 @@ async function main() {
           agent: agentData,
           queriedAt: new Date().toISOString(),
           settledOn: "Arc Testnet",
+          paymentProtocol: "Circle Gateway Nanopayments",
         });
       } catch (error) {
-        console.error("Reputation query error:", error);
+        console.error("Query error:", error);
         return res.status(500).json({ error: "Query failed" });
       }
     }
   );
 
-  // Paid endpoint — all registered agents leaderboard
+  // Paid leaderboard
   app.get(
     "/leaderboard",
     gateway.require("$0.000001"),
-    async (req, res) => {
-      try {
-        return res.json({
-          protocol: "Stoa Protocol",
-          description: "Top agents by reputation on Arc Testnet",
-          note: "Query individual agents via /reputation/:address",
-          settledOn: "Arc Testnet",
-          queriedAt: new Date().toISOString(),
-        });
-      } catch (error) {
-        return res.status(500).json({ error: "Leaderboard query failed" });
-      }
+    async (_req, res) => {
+      return res.json({
+        protocol: "Stoa Protocol",
+        description: "Agent leaderboard — query /reputation/:address for scores",
+        settledOn: "Arc Testnet",
+        queriedAt: new Date().toISOString(),
+      });
     }
   );
 
   app.listen(PORT, () => {
     console.log(`\nReputation API live at http://localhost:${PORT}`);
-    console.log("Endpoints:");
-    console.log("  GET /health                  — free");
-    console.log("  GET /reputation/:address     — $0.000001 USDC");
-    console.log("  GET /leaderboard             — $0.000001 USDC");
-    console.log("\nWaiting for paid reputation queries...");
+    console.log("GET /health            — free");
+    console.log("GET /reputation/:addr  — $0.000001 USDC");
+    console.log("GET /leaderboard       — $0.000001 USDC");
   });
 }
 
 main().catch((error) => {
-  console.error("Reputation server error:", error);
+  console.error("Server error:", error);
   process.exit(1);
 });
