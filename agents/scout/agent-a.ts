@@ -8,7 +8,7 @@ import { CONFIG } from "../config.js";
 
 const BASE_SEPOLIA_RPC = process.env.BASE_SEPOLIA_RPC_URL!;
 const CHAINLINK_ETH_USD_BASE = "0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1";
-const SPREAD_THRESHOLD = 0.001;
+const SPREAD_THRESHOLD = 0.05;
 
 const chainlinkAbi = [
   "function latestRoundData() view returns (uint80, int256, uint256, uint256, uint80)",
