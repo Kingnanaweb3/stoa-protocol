@@ -16,6 +16,11 @@ async function main() {
   const SettlementArtifact = await hre.artifacts.readArtifact("StoaSettlement");
   const EscrowArtifact = await hre.artifacts.readArtifact("StoaEscrow");
 
+  // Arc testnet addresses
+  const USDC_ARC_TESTNET = "0x3600000000000000000000000000000000000000";
+  // CCTP V2 Message Transmitter on Arc testnet
+  const CCTP_TRANSMITTER_ARC = "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275";
+
   // 1. Deploy Reputation
   console.log("\nDeploying StoaReputation...");
   const ReputationFactory = new ethers.ContractFactory(
@@ -55,8 +60,7 @@ async function main() {
   const settlementAddress = await settlement.getAddress();
   console.log("StoaSettlement deployed to:", settlementAddress);
 
-  // 4. Deploy Escrow
-  const USDC_ARC_TESTNET = "0x3600000000000000000000000000000000000000";
+  // 4. Deploy Escrow with CCTP transmitter
   console.log("\nDeploying StoaEscrow...");
   const EscrowFactory = new ethers.ContractFactory(
     EscrowArtifact.abi,
@@ -66,7 +70,8 @@ async function main() {
   const escrow = await EscrowFactory.deploy(
     registryAddress,
     settlementAddress,
-    USDC_ARC_TESTNET
+    USDC_ARC_TESTNET,
+    CCTP_TRANSMITTER_ARC  // ← new: CCTP hook receiver
   );
   await escrow.waitForDeployment();
   const escrowAddress = await escrow.getAddress();
@@ -94,6 +99,7 @@ async function main() {
   console.log("StoaRegistry:  ", registryAddress);
   console.log("StoaSettlement:", settlementAddress);
   console.log("StoaEscrow:    ", escrowAddress);
+  console.log("CCTP Transmitter:", CCTP_TRANSMITTER_ARC);
 }
 
 main().catch((error) => {

@@ -9,9 +9,10 @@ contract StoaSettlement {
     StoaReputation public reputationContract;
     StoaRegistry public registryContract;
     address public escrowContract;
+    address public validator;
     address public owner;
 
-    enum JobStatus { Pending, Completed, Failed, Disputed }
+    enum JobStatus { Pending, AwaitingValidation, Completed, Failed, Disputed }
 
     struct Settlement {
         address poster;
@@ -27,7 +28,9 @@ contract StoaSettlement {
 
     event JobSettled(bytes32 indexed jobId, address fulfiller, uint256 amount);
     event JobFailed(bytes32 indexed jobId, address fulfiller);
+    event OutputSubmitted(bytes32 indexed jobId, address indexed fulfiller, bytes32 outputHash);
     event EscrowContractSet(address escrowContract);
+    event ValidatorSet(address validator);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Not owner");
@@ -36,6 +39,11 @@ contract StoaSettlement {
 
     modifier onlyEscrow() {
         require(msg.sender == escrowContract, "Not escrow contract");
+        _;
+    }
+
+    modifier onlyValidator() {
+        require(msg.sender == validator, "Not validator");
         _;
     }
 
@@ -51,6 +59,12 @@ contract StoaSettlement {
     function setEscrowContract(address _escrow) external onlyOwner {
         escrowContract = _escrow;
         emit EscrowContractSet(_escrow);
+    }
+
+    // Set Agent C as the authorized validator
+    function setValidator(address _validator) external onlyOwner {
+        validator = _validator;
+        emit ValidatorSet(_validator);
     }
 
     function createSettlement(
@@ -74,6 +88,7 @@ contract StoaSettlement {
         });
     }
 
+    // Agent B submits output hash — moves to AwaitingValidation
     function submitOutput(
         bytes32 jobId,
         bytes32 outputHash
@@ -85,18 +100,47 @@ contract StoaSettlement {
         require(block.timestamp <= s.deadline, "Deadline passed");
 
         s.outputHash = outputHash;
+        s.status = JobStatus.AwaitingValidation;
+
+        // Emit event — Agent C is listening for this
+        emit OutputSubmitted(jobId, msg.sender, outputHash);
+    }
+
+    // Agent C calls this after verifying execution on Base Sepolia
+    function verifyAndComplete(bytes32 jobId) external onlyValidator {
+        Settlement storage s = settlements[jobId];
+        require(s.exists, "Settlement not found");
+        require(s.status == JobStatus.AwaitingValidation, "Not awaiting validation");
+        require(block.timestamp <= s.deadline, "Deadline passed");
+
         s.status = JobStatus.Completed;
 
         // Update reputation — success
-        reputationContract.updateReputation(msg.sender, true, s.amount);
+        reputationContract.updateReputation(s.fulfiller, true, s.amount);
 
-        emit JobSettled(jobId, msg.sender, s.amount);
+        emit JobSettled(jobId, s.fulfiller, s.amount);
+    }
+
+    // Dispute a job — owner or poster can flag
+    function disputeJob(bytes32 jobId) external {
+        Settlement storage s = settlements[jobId];
+        require(s.exists, "Settlement not found");
+        require(
+            msg.sender == owner || msg.sender == s.poster,
+            "Not authorized to dispute"
+        );
+        require(
+            s.status == JobStatus.AwaitingValidation,
+            "Not awaiting validation"
+        );
+
+        s.status = JobStatus.Disputed;
     }
 
     function failJob(bytes32 jobId) external {
         Settlement storage s = settlements[jobId];
         require(s.exists, "Settlement not found");
-        require(s.status == JobStatus.Pending, "Job not pending");
+        require(s.status == JobStatus.Pending || s.status == JobStatus.AwaitingValidation, "Job not active");
         require(block.timestamp > s.deadline, "Deadline not passed yet");
 
         s.status = JobStatus.Failed;
@@ -104,7 +148,7 @@ contract StoaSettlement {
         // Update reputation — failure
         reputationContract.updateReputation(s.fulfiller, false, 0);
 
-        // Slash the fulfiller's stake
+        // Slash the fulfiller stake
         registryContract.slash(s.fulfiller, s.amount / 10);
 
         emit JobFailed(jobId, s.fulfiller);

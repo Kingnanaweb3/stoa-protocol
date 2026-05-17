@@ -10,12 +10,22 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
 }
 
-contract StoaEscrow {
+// CCTP V2 Hook Interface
+interface IMessageTransmitterHook {
+    function handleReceiveMessage(
+        uint32 sourceDomain,
+        bytes32 /* sender */,
+        bytes calldata messageBody
+    ) external returns (bool);
+}
+
+contract StoaEscrow is IMessageTransmitterHook {
 
     StoaRegistry public registryContract;
     StoaSettlement public settlementContract;
     IERC20 public usdc;
     address public owner;
+    address public cctpMessageTransmitter;
 
     struct Job {
         bytes32 jobId;
@@ -41,6 +51,17 @@ contract StoaEscrow {
         _;
         locked = false;
     }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+
+    modifier onlyCCTP() {
+        require(msg.sender == cctpMessageTransmitter, "Only CCTP transmitter");
+        _;
+    }
+
     bytes32[] public jobList;
 
     event JobPosted(
@@ -69,23 +90,27 @@ contract StoaEscrow {
         uint256 amount
     );
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Not owner");
-        _;
-    }
+    event CrossChainJobPosted(
+        bytes32 indexed jobId,
+        address indexed poster,
+        uint32 sourceDomain,
+        uint256 bounty
+    );
 
     constructor(
         address _registryContract,
         address _settlementContract,
-        address _usdcAddress
+        address _usdcAddress,
+        address _cctpMessageTransmitter
     ) {
         owner = msg.sender;
         registryContract = StoaRegistry(_registryContract);
         settlementContract = StoaSettlement(_settlementContract);
         usdc = IERC20(_usdcAddress);
+        cctpMessageTransmitter = _cctpMessageTransmitter;
     }
 
-    // Post a job with USDC payment locked in escrow
+    // Post a job with USDC payment locked in escrow (same-chain)
     function postJob(
         string memory task,
         uint256 bounty,
@@ -95,13 +120,11 @@ contract StoaEscrow {
     ) external returns (bytes32) {
         require(bounty > 0, "Bounty must be greater than 0");
 
-        // Transfer USDC from poster to this contract
         require(
             usdc.transferFrom(msg.sender, address(this), bounty),
             "USDC transfer failed"
         );
 
-        // Generate unique job ID
         bytes32 jobId = keccak256(
             abi.encodePacked(msg.sender, task, block.timestamp, nonces[msg.sender]++)
         );
@@ -124,16 +147,71 @@ contract StoaEscrow {
 
         jobList.push(jobId);
 
-        emit JobPosted(
-            jobId,
-            msg.sender,
-            bounty,
-            task,
-            requiredCapability,
-            deadline
-        );
+        emit JobPosted(jobId, msg.sender, bounty, task, requiredCapability, deadline);
 
         return jobId;
+    }
+
+    // CCTP V2 Hook — called automatically when USDC arrives cross-chain
+    // Agent A on Base calls burnWithHook() — this fires atomically on Arc
+    function handleReceiveMessage(
+        uint32 sourceDomain,
+        bytes32 /* sender */,
+        bytes calldata messageBody
+    ) external override onlyCCTP returns (bool) {
+
+        (
+            address poster,
+            uint256 bounty,
+            string memory task,
+            string memory requiredCapability,
+            uint256 minReputation,
+            uint256 deadlineInSeconds
+        ) = abi.decode(
+            messageBody,
+            (address, uint256, string, string, uint256, uint256)
+        );
+
+        require(bounty > 0, "Bounty must be greater than 0");
+
+        // USDC already arrived via CCTP — create job immediately
+        bytes32 jobId = keccak256(
+            abi.encodePacked(
+                poster,
+                task,
+                block.timestamp,
+                nonces[poster]++,
+                sourceDomain
+            )
+        );
+
+        uint256 deadline = block.timestamp + deadlineInSeconds;
+
+        jobs[jobId] = Job({
+            jobId: jobId,
+            poster: poster,
+            fulfiller: address(0),
+            bounty: bounty,
+            task: task,
+            requiredCapability: requiredCapability,
+            minReputation: minReputation,
+            deadline: deadline,
+            funded: true,
+            released: false,
+            exists: true
+        });
+
+        jobList.push(jobId);
+
+        emit JobPosted(jobId, poster, bounty, task, requiredCapability, deadline);
+        emit CrossChainJobPosted(jobId, poster, sourceDomain, bounty);
+
+        return true;
+    }
+
+    // Update CCTP transmitter address if needed
+    function setCctpTransmitter(address _transmitter) external onlyOwner {
+        cctpMessageTransmitter = _transmitter;
     }
 
     // Agent accepts a job
@@ -150,7 +228,6 @@ contract StoaEscrow {
 
         job.fulfiller = msg.sender;
 
-        // Create settlement record
         settlementContract.createSettlement(
             jobId,
             job.poster,
@@ -169,7 +246,7 @@ contract StoaEscrow {
         require(!job.released, "Already released");
         require(job.fulfiller != address(0), "No fulfiller");
 
-        (,, , StoaSettlement.JobStatus status,,) = 
+        (,, , StoaSettlement.JobStatus status,,) =
             settlementContract.getSettlement(jobId);
 
         require(
